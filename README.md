@@ -370,7 +370,3 @@ Computer Science & Engineering Student
 https://github.com/lathasri-dev
 
 ---
-
-## License
-
-This project is developed for academic, educational, and portfolio purposes.
