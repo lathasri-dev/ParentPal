@@ -1,0 +1,83 @@
+/* 
+  CHILD MODE AESTHETICS 
+  This file adds animated background elements to the Child Play Area 
+  without affecting the existing layout.
+*/
+
+/* Target the main sky container in ChildPlayArea.jsx */
+.bg-sky-100 {
+    position: relative;
+    overflow: hidden !important;
+    background: linear-gradient(180deg, #e0f2fe 0%, #bae6fd 100%) !important;
+}
+
+/* Floating Elements Container */
+.bg-sky-100::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image: 
+        radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.4) 0%, transparent 10%),
+        radial-gradient(circle at 80% 10%, rgba(255, 255, 255, 0.3) 0%, transparent 15%),
+        radial-gradient(circle at 50% 80%, rgba(255, 255, 255, 0.4) 0%, transparent 12%),
+        radial-gradient(circle at 10% 90%, rgba(255, 255, 255, 0.2) 0%, transparent 8%);
+    animation: floatingBackground 20s ease-in-out infinite alternate;
+}
+
+/* Floating Shapes using Pseudo-elements */
+.bg-sky-100::after {
+    content: '☁️';
+    font-size: 5rem;
+    position: absolute;
+    top: 10%;
+    left: -10%;
+    opacity: 0.3;
+    z-index: 0;
+    filter: blur(2px);
+    animation: driftClouds 60s linear infinite;
+}
+
+/* New Layer for more shapes */
+.aesthetic-overlay {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.floating-bubble {
+    position: absolute;
+    border-radius: 50%;
+    background: white;
+    opacity: 0.15;
+    animation: floatUp var(--duration) linear infinite;
+    bottom: -100px;
+}
+
+@keyframes floatingBackground {
+    from { transform: scale(1) translate(0, 0); }
+    to { transform: scale(1.1) translate(2%, 2%); }
+}
+
+@keyframes driftClouds {
+    from { transform: translateX(0); }
+    to { transform: translateX(120vw); }
+}
+
+@keyframes floatUp {
+    from {
+        transform: translateY(0) rotate(0deg);
+        opacity: 0.15;
+    }
+    to {
+        transform: translateY(-110vh) rotate(360deg);
+        opacity: 0;
+    }
+}
+
+/* Add some sparkle to buttons without changing their size */
+.bg-sky-100 button:hover {
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.6), 0 10px 15px -3px rgba(0, 0, 0, 0.1) !important;
+}
