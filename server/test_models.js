@@ -9,13 +9,13 @@ async function listModels() {
     // but we can try to fetch them via the REST endpoint if we wanted.
     // However, let's just try to hit "gemini-pro" which is very stable.
 
-    console.log("Testing gemini-1.5-flash...");
+    console.log("Testing gemini-3.6-flash...");
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
         const res = await model.generateContent("test");
-        console.log("gemini-1.5-flash works!");
+        console.log("gemini-3.6-flash works!");
     } catch (e) {
-        console.log("gemini-1.5-flash failed:", e.message);
+        console.log("gemini-3.6-flash failed:", e.message);
     }
 
     console.log("Testing gemini-pro...");

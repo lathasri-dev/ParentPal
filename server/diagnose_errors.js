@@ -14,7 +14,7 @@ async function diagnose() {
         const genAI = new GoogleGenerativeAI(apiKey);
         try {
             // Try different model variants
-            const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"];
+            const modelsToTry = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"];
             for (const modelName of modelsToTry) {
                 console.log(`Trying model: ${modelName}...`);
                 const model = genAI.getGenerativeModel({ model: modelName });

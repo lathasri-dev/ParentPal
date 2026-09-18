@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../../config';
 import { Lightbulb, Loader2, CheckCircle } from 'lucide-react';
 
@@ -7,6 +7,36 @@ const ActivityGenerator = ({ childId }) => {
     const [activities, setActivities] = useState([]);
     const [loading, setLoading] = useState(false);
     const [contextUsed, setContextUsed] = useState([]);
+
+    useEffect(() => {
+        if (!childId) {
+            setActivities([]);
+            setContextUsed([]);
+            return;
+        }
+
+        let isMounted = true;
+        setActivities([]);
+        setContextUsed([]);
+        setLoading(true);
+
+        fetch(`${API_BASE_URL}/api/generate-activity/${childId}`)
+            .then(res => res.ok ? res.json() : Promise.reject(res))
+            .then(data => {
+                if (isMounted && data.activities) {
+                    setActivities(data.activities.activities || data.activities);
+                    setContextUsed(data.contextUsed || []);
+                }
+            })
+            .catch(err => {
+                console.error("No previous report found or fetch error:", err);
+            })
+            .finally(() => {
+                if (isMounted) setLoading(false);
+            });
+
+        return () => { isMounted = false; };
+    }, [childId]);
 
     const handleGenerate = async () => {
         if (!childId) return alert("Please select a child first");
@@ -70,6 +100,12 @@ const ActivityGenerator = ({ childId }) => {
 
             {/* Results */}
             <div className="space-y-4">
+                {!loading && activities.length === 0 && childId && (
+                    <div className="text-center p-8 bg-gray-50 rounded-xl border border-dashed border-gray-300 text-gray-500">
+                        <p>No activities generated yet for this child.</p>
+                        <p className="text-sm mt-2">Enter a specific goal above and click Generate!</p>
+                    </div>
+                )}
                 {activities.map((act, idx) => (
                     <div key={idx} className="bg-gradient-to-r from-indigo-50 to-purple-50 p-4 rounded-xl border border-indigo-100">
                         <h4 className="font-bold text-lg text-indigo-800 mb-1">{act.title}</h4>

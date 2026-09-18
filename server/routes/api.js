@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const ChildProfile = require('../models/ChildProfile');
 const ActivityLog = require('../models/ActivityLog');
+const GeneratedReport = require('../models/GeneratedReport');
 const { generateContent } = require('../services/aiService');
 const { queryVectorDB, upsertVectorDB } = require('../services/ragService');
 const mongoose = require('mongoose');
@@ -9,6 +10,7 @@ const mongoose = require('mongoose');
 // In-memory store for Demo Mode (if MongoDB is disconnected)
 let demoProfiles = [];
 let demoActivities = [];
+let demoGeneratedReports = [];
 
 // --- Child Profile Routes ---
 
@@ -119,7 +121,7 @@ router.post('/child', async (req, res) => {
         // Sync to Pinecone (Upsert handles both create and update)
         try {
             const profileText = `Child Profile: ${name}, Age: ${child.age}. Interests: ${child.interests?.join(', ')}. Strengths: ${child.strengths?.join(', ')}. Challenges: ${child.challenges?.join(', ')}.`;
-            await upsertVectorDB(child._id, profileText, { type: 'profile', name, age: child.age });
+            await upsertVectorDB(child._id, profileText, { type: 'profile', childId: child._id.toString(), age: child.age });
         } catch (vdbError) {
             console.warn("Vector DB Sync failed, but profile saved to MongoDB.");
         }
@@ -216,11 +218,15 @@ router.post('/generate-activity', async (req, res) => {
         }
         if (!child) return res.status(404).json({ message: "Child not found" });
 
+        console.log(`\n[Generate]`);
+        console.log(`Selected child ID: ${child._id}`);
+        console.log(`Selected child name: ${child.name}`);
+
         // 1. Construct Query for RAG
         const query = `${child.age} year old ${specificGoal || 'development'} ${child.challenges.join(' ')}`;
 
         // 2. Retrieve Relevant Milestones
-        const retrievedDocs = await queryVectorDB(query, 3);
+        const retrievedDocs = await queryVectorDB(query, 3, { childId: child._id.toString() });
         const context = retrievedDocs.map(doc => doc.text).join("\n\n");
 
         // 3. Generate Activity with Gemini
@@ -242,16 +248,64 @@ router.post('/generate-activity', async (req, res) => {
       Do not include markdown formatting.
     `;
 
+        console.log(`\n[Gemini]`);
+        console.log(`Generation model: gemini-flash-latest`);
+        console.log(`Request started: ${new Date().toISOString()}`);
+
         const aiResponse = await generateContent(prompt);
+
+        console.log(`Response success: true`);
+        console.log(`HTTP status: 200`);
 
         // Attempt to clean and parse JSON if Gemini returns markdown blocks
         const cleanedResponse = aiResponse.replace(/```json/g, '').replace(/```/g, '').trim();
         const activities = JSON.parse(cleanedResponse);
 
+        console.log(`\n[MongoDB]`);
+        console.log(`Saving report for childId: ${child._id}`);
+
+        // Save to DB (or In-Memory if demo mode)
+        if (mongoose.connection.readyState !== 1) {
+            demoGeneratedReports = demoGeneratedReports.filter(r => r.childId !== childId);
+            demoGeneratedReports.push({ childId, activities, contextUsed: retrievedDocs, updatedAt: new Date() });
+        } else {
+            await GeneratedReport.findOneAndUpdate(
+                { childId: child._id },
+                { activities, contextUsed: retrievedDocs, updatedAt: Date.now() },
+                { upsert: true, new: true }
+            );
+        }
+
         res.json({ activities, contextUsed: retrievedDocs });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "Failed to generate activities", details: error.message });
+        console.error("\n[Gemini/Generate] Error:", error.message);
+        
+        // Use 503 if overloaded, 500 otherwise
+        const status = error.message.includes('503') || error.message.includes('fetch') || error.message.includes('overloaded') ? 503 : 500;
+        console.log(`Response failure: true`);
+        console.log(`HTTP status: ${status}`);
+
+        res.status(status).json({ 
+            error: "Failed to generate activities. AI service may be temporarily unavailable.", 
+            details: error.message 
+        });
+    }
+});
+
+router.get('/generate-activity/:childId', async (req, res) => {
+    try {
+        const { childId } = req.params;
+        if (mongoose.connection.readyState !== 1) {
+            const report = demoGeneratedReports.find(r => r.childId === childId);
+            if (!report) return res.status(404).json({ message: "No report found" });
+            return res.json(report);
+        }
+
+        const report = await GeneratedReport.findOne({ childId });
+        if (!report) return res.status(404).json({ message: "No report found" });
+        res.json(report);
+    } catch (error) {
+        res.status(500).json({ error: "Failed to fetch report" });
     }
 });
 

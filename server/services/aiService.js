@@ -1,63 +1,203 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { GoogleGenAI } = require("@google/genai");
 
 const apiKey = process.env.GOOGLE_API_KEY;
-console.log("DEBUG: Google API Key loaded?", apiKey ? "YES (Starts with " + apiKey.substring(0, 4) + "...)" : "NO");
 
-const genAI = new GoogleGenerativeAI(apiKey);
+console.log(
+    "DEBUG: Google API Key loaded?",
+    apiKey
+        ? "YES (Starts with " + apiKey.substring(0, 4) + "...)"
+        : "NO"
+);
 
-// Use 'gemini-pro' as it was verified to work in this environment (likely maps to 1.0-pro or 1.5-pro)
-const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-const embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
+if (!apiKey) {
+    throw new Error("GOOGLE_API_KEY is missing from .env");
+}
 
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const ai = new GoogleGenAI({
+    apiKey: apiKey
+});
+
+// ============================================================
+// MODELS
+// ============================================================
+
+// Text generation model
+const GENERATION_MODEL = "gemini-3.8-flash";
+
+// Current Gemini embedding model
+const EMBEDDING_MODEL = "gemini-embedding-001";
+
+// Your Pinecone index dimension is 768
+const EMBEDDING_DIMENSION = 768;
+
+
+// ============================================================
+// HELPER
+// ============================================================
+
+const delay = (ms) =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+
+
+// ============================================================
+// GEMINI TEXT GENERATION
+// ============================================================
 
 exports.generateContent = async (prompt, retries = 3) => {
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+        console.log(
+            `\n[Gemini/Generate] Model: ${GENERATION_MODEL}`
+        );
+
+        const response = await ai.models.generateContent({
+            model: GENERATION_MODEL,
+            contents: prompt
+        });
+
+        if (!response || !response.text) {
+            throw new Error(
+                "Gemini returned an empty response."
+            );
+        }
+
+        return response.text;
+
     } catch (error) {
-        if (error.message.includes("429") && retries > 0) {
-            console.warn(`⚠️ 429 (Quota Exceeded) on ${model.model}. Retrying in 4s... (${retries} attempts left)`);
-            await delay(4000);
-            return exports.generateContent(prompt, retries - 1);
+
+        const message =
+            error?.message || String(error);
+
+        console.error(
+            `[Gemini/Generate] Error: ${message}`
+        );
+
+        // Retry temporary API errors
+        if (
+            (
+                message.includes("429") ||
+                message.includes("503") ||
+                message.includes("fetch") ||
+                message.includes("overloaded")
+            ) &&
+            retries > 0
+        ) {
+
+            const backoff =
+                2000 * Math.pow(2, 3 - retries);
+
+            console.warn(
+                `⚠️ Gemini API Error. Retrying in ${backoff}ms... (${retries} attempts left)`
+            );
+
+            await delay(backoff);
+
+            return exports.generateContent(
+                prompt,
+                retries - 1
+            );
         }
 
-        // Fallback or specific error handling
-        if (error.message.includes("404") || error.message.includes("not found")) {
-            console.warn("⚠️ Model not found. Attempting to use 'gemini-pro' explicitly...");
-            try {
-                const backupModel = genAI.getGenerativeModel({ model: "gemini-pro" });
-                const result = await backupModel.generateContent(prompt);
-                return (await result.response).text();
-            } catch (backupError) {
-                console.error("Backup model also failed:", backupError.message);
-            }
-        }
-
-        console.warn("⚠️ Google Gemini API Failed. Falling back to MOCK data.");
-        console.warn(`Error: ${error.message}`);
-
-        // Return mock data based on prompt context
-        if (prompt.includes("activities")) {
-            return JSON.stringify([
-                { title: `⚠️ ERROR: ${error.message}`, description: "This is the reason the Real AI failed.", materials_needed: "Check Server Log", educational_benefit: "Debugging" },
-                { title: "Sensory Bin (Mock)", description: "Fill a bin with rice and hidden toys.", materials_needed: "Rice, bin, small toys", educational_benefit: "Sensory play" },
-                { title: "Color Sort (Mock)", description: "Sort blocks by color.", materials_needed: "Colored blocks", educational_benefit: "Cognitive skills" }
-            ]);
-        }
-        if (prompt.includes("storyteller")) return "Once upon a time, there was a brave little explorer who loved to learn... (Demo Story)";
-        return "Hoot hoot! I am currently in Demo Mode because the API Key is missing. But I can still be your friend! 🦉";
+        throw new Error(
+            `AI generation failed: ${message}`
+        );
     }
 };
 
-exports.getEmbedding = async (text) => {
+
+// ============================================================
+// GEMINI EMBEDDING
+// ============================================================
+
+exports.getEmbedding = async (text, retries = 3) => {
+
     try {
-        const result = await embeddingModel.embedContent(text);
-        return result.embedding.values;
+
+        console.log(
+            `\n[Embedding] Model: ${EMBEDDING_MODEL}`
+        );
+
+        const response =
+            await ai.models.embedContent({
+                model: EMBEDDING_MODEL,
+                contents: text,
+                config: {
+                    outputDimensionality:
+                        EMBEDDING_DIMENSION
+                }
+            });
+
+        if (
+            !response ||
+            !response.embeddings ||
+            response.embeddings.length === 0 ||
+            !response.embeddings[0].values
+        ) {
+            throw new Error(
+                "Gemini returned an empty embedding."
+            );
+        }
+
+        const embedding =
+            response.embeddings[0].values;
+
+        console.log(
+            `[Embedding] Generated vector dimension: ${embedding.length}`
+        );
+
+        // Safety check for Pinecone
+        if (
+            embedding.length !==
+            EMBEDDING_DIMENSION
+        ) {
+            throw new Error(
+                `Embedding dimension mismatch. Expected ${EMBEDDING_DIMENSION}, received ${embedding.length}.`
+            );
+        }
+
+        return embedding;
+
     } catch (error) {
-        console.warn("⚠️ Google Gemini Embedding Failed. Using Mock Vector.");
-        // Return a random 768-dimensional vector for demo purposes
-        return Array(768).fill(0).map(() => Math.random());
+
+        const message =
+            error?.message || String(error);
+
+        console.error(
+            `⚠️ Gemini Embedding Error: ${message}`
+        );
+
+        // Retry temporary errors
+        if (
+            (
+                message.includes("429") ||
+                message.includes("503") ||
+                message.includes("fetch") ||
+                message.includes("overloaded")
+            ) &&
+            retries > 0
+        ) {
+
+            const backoff =
+                2000 * Math.pow(2, 3 - retries);
+
+            console.warn(
+                `⚠️ Embedding API Error. Retrying in ${backoff}ms... (${retries} attempts left)`
+            );
+
+            await delay(backoff);
+
+            return exports.getEmbedding(
+                text,
+                retries - 1
+            );
+        }
+
+        // Do NOT use the old embedding-001 fallback.
+        console.error(
+            "❌ Gemini Embedding Failed permanently."
+        );
+
+        throw new Error(
+            `Embedding generation failed: ${message}`
+        );
     }
 };
