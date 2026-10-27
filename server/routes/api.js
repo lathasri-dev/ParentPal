@@ -257,9 +257,24 @@ router.post('/generate-activity', async (req, res) => {
         console.log(`Response success: true`);
         console.log(`HTTP status: 200`);
 
-        // Attempt to clean and parse JSON if Gemini returns markdown blocks
-        const cleanedResponse = aiResponse.replace(/```json/g, '').replace(/```/g, '').trim();
-        const activities = JSON.parse(cleanedResponse);
+        // Robust JSON parsing (extract JSON object or markdown block, with graceful fallback)
+        let activities;
+        try {
+            const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+            const cleanedResponse = jsonMatch ? jsonMatch[0] : aiResponse.replace(/```json/gi, '').replace(/```/g, '').trim();
+            const parsed = JSON.parse(cleanedResponse);
+            activities = parsed.activities || parsed;
+        } catch (parseErr) {
+            console.warn("⚠️ JSON parse warning on AI response, using structured fallback:", parseErr.message);
+            activities = [
+                {
+                    title: "Creative Developmental Play",
+                    description: aiResponse.slice(0, 300),
+                    materials_needed: "Household materials",
+                    educational_benefit: "Fine motor and cognitive development"
+                }
+            ];
+        }
 
         console.log(`\n[MongoDB]`);
         console.log(`Saving report for childId: ${child._id}`);
@@ -272,7 +287,7 @@ router.post('/generate-activity', async (req, res) => {
             await GeneratedReport.findOneAndUpdate(
                 { childId: child._id },
                 { activities, contextUsed: retrievedDocs, updatedAt: Date.now() },
-                { upsert: true, new: true }
+                { upsert: true, returnDocument: 'after' }
             );
         }
 
@@ -380,13 +395,13 @@ router.post('/story', async (req, res) => {
 
         const story = await generateContent(prompt);
 
-        // Sync to Pinecone (Fire and forget or wait depending on preference, here wait for confirmation)
+        // Sync to Pinecone (safely catch any vector background errors)
         if (child && child._id) {
             upsertVectorDB(`story_${Date.now()}`, story, {
                 type: 'story',
                 childId: child._id,
                 theme: theme || 'adventure'
-            });
+            }).catch(err => console.warn("Background Pinecone upsert for story failed:", err.message));
         }
 
         res.json({ story });
@@ -409,11 +424,11 @@ router.post('/chat', async (req, res) => {
     try {
         const response = await generateContent(`${systemPrompt}\n\nChild: ${message}\nProfessor Owl:`);
 
-        // Sync interaction to Pinecone
+        // Sync interaction to Pinecone (safely catch any vector background errors)
         upsertVectorDB(`chat_${Date.now()}`, `Child: ${message} | Owl: ${response}`, {
             type: 'chat',
             age: age || 5
-        });
+        }).catch(err => console.warn("Background Pinecone upsert for chat failed:", err.message));
 
         res.json({ reply: response });
     } catch (error) {

@@ -1,63 +1,88 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-const { Pinecone } = require("@pinecone-database/pinecone");
 require("dotenv").config();
+const mongoose = require("mongoose");
+const { Pinecone } = require("@pinecone-database/pinecone");
+const { generateContent, getEmbedding } = require("./services/aiService");
 
 async function diagnose() {
-    console.log("--- DIAGNOSIS START ---");
+    console.log("=========================================");
+    console.log("       PARENTPAL HEALTH DIAGNOSIS        ");
+    console.log("=========================================");
 
-    // 1. Test Gemini
-    const apiKey = process.env.GOOGLE_API_KEY;
-    if (!apiKey) {
-        console.error("❌ GOOGLE_API_KEY missing in .env");
-    } else {
-        console.log(`Checking Gemini with key: ${apiKey.substring(0, 4)}...`);
-        const genAI = new GoogleGenerativeAI(apiKey);
-        try {
-            // Try different model variants
-            const modelsToTry = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"];
-            for (const modelName of modelsToTry) {
-                console.log(`Trying model: ${modelName}...`);
-                const model = genAI.getGenerativeModel({ model: modelName });
-                try {
-                    const result = await model.generateContent("Hi");
-                    console.log(`✅ Gemini ${modelName} works! Response: ${result.response.text().substring(0, 10)}...`);
-                    break;
-                } catch (e) {
-                    console.error(`❌ Gemini ${modelName} failed: ${e.message}`);
-                }
-            }
-        } catch (e) {
-            console.error(`❌ Gemini SDK error: ${e.message}`);
-        }
+    let allPassed = true;
+
+    // 1. Test Gemini AI Generation
+    try {
+        console.log("\n[1/4] Testing Gemini Text Generation...");
+        const response = await generateContent("Reply with only the word: OK");
+        console.log(`✅ Gemini Generation passed! Response: "${response.trim()}"`);
+    } catch (e) {
+        allPassed = false;
+        console.error(`❌ Gemini Generation failed: ${e.message}`);
     }
 
-    // 2. Test Pinecone
+    // 2. Test Gemini AI Embedding
+    try {
+        console.log("\n[2/4] Testing Gemini Vector Embeddings...");
+        const embedding = await getEmbedding("Diagnostic vector test");
+        if (embedding.length === 768) {
+            console.log(`✅ Gemini Embedding passed! Dimension: ${embedding.length}`);
+        } else {
+            allPassed = false;
+            console.error(`❌ Unexpected embedding dimension: ${embedding.length} (expected 768)`);
+        }
+    } catch (e) {
+        allPassed = false;
+        console.error(`❌ Gemini Embedding failed: ${e.message}`);
+    }
+
+    // 3. Test Pinecone Vector Database
     const pcKey = process.env.PINECONE_API_KEY;
     const indexName = process.env.PINECONE_INDEX || 'parentpal';
     if (!pcKey) {
-        console.error("❌ PINECONE_API_KEY missing in .env");
+        allPassed = false;
+        console.error("\n[3/4] ❌ PINECONE_API_KEY missing in .env");
     } else {
-        console.log(`Checking Pinecone with key: ${pcKey.substring(0, 4)}...`);
-        const pc = new Pinecone({ apiKey: pcKey });
         try {
+            console.log("\n[3/4] Testing Pinecone Database...");
+            const pc = new Pinecone({ apiKey: pcKey });
             const description = await pc.describeIndex(indexName);
-            console.log(`✅ Pinecone Index '${indexName}' found.`);
-            console.log(`   Dimension: ${description.dimension}`);
-            console.log(`   Metric: ${description.metric}`);
-            console.log(`   Status: ${description.status.state}`);
-
+            console.log(`✅ Pinecone Index '${indexName}' verified!`);
+            console.log(`   Dimension: ${description.dimension} | Metric: ${description.metric} | Status: ${description.status?.state || 'Ready'}`);
             if (description.dimension !== 768) {
-                console.warn(`⚠️ DIMENSION MISMATCH: Index is ${description.dimension}, but Gemini produces 768.`);
-                console.log("Attempting to recreate index with 768 dimensions...");
-                // Note: Recreating index takes time and might fail if serverless/pod limit reached
-                // But let's see if we can at least detect it properly.
+                allPassed = false;
+                console.error(`⚠️ Dimension mismatch: Index is ${description.dimension}, expected 768.`);
             }
         } catch (e) {
+            allPassed = false;
             console.error(`❌ Pinecone error: ${e.message}`);
         }
     }
 
-    console.log("--- DIAGNOSIS END ---");
+    // 4. Test MongoDB Database
+    const mongoUri = (process.env.MONGODB_URI || '').trim().replace(/^[\s\\"'`]+|[\s\\"'`]+$/g, '');
+    if (!mongoUri) {
+        allPassed = false;
+        console.error("\n[4/4] ❌ MONGODB_URI missing in .env");
+    } else {
+        try {
+            console.log("\n[4/4] Testing MongoDB Atlas Connection...");
+            await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 5000 });
+            console.log(`✅ MongoDB Atlas connected successfully! Host: ${mongoose.connection.host}`);
+            await mongoose.disconnect();
+        } catch (e) {
+            allPassed = false;
+            console.error(`❌ MongoDB connection error: ${e.message}`);
+        }
+    }
+
+    console.log("\n=========================================");
+    if (allPassed) {
+        console.log("🎉 ALL CHECKS PASSED: ParentPal is healthy!");
+    } else {
+        console.log("⚠️ SOME CHECKS FAILED: Review the errors above.");
+    }
+    console.log("=========================================");
+    process.exit(allPassed ? 0 : 1);
 }
 
 diagnose();

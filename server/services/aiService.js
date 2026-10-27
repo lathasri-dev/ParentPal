@@ -1,3 +1,4 @@
+require("dotenv").config();
 const { GoogleGenAI } = require("@google/genai");
 
 const apiKey = process.env.GOOGLE_API_KEY;
@@ -22,7 +23,7 @@ const ai = new GoogleGenAI({
 // ============================================================
 
 // Text generation model
-const GENERATION_MODEL = "gemini-3.8-flash";
+const GENERATION_MODEL = "gemini-3.5-flash";
 
 // Current Gemini embedding model
 const EMBEDDING_MODEL = "gemini-embedding-001";
